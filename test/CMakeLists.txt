@@ -32,11 +32,70 @@ set(NETWORK_SOURCES
     ${PARENT_DIR}/src/darwincore/network/worker_pool.cpp
 )
 
-# 创建测试可执行文件，直接编译 network 源码
+# ==================== 测试 1: 基本通信测试 ====================
 add_executable(server_client_test
     server_client_test.cpp
     ${NETWORK_SOURCES}
 )
-
-# 编译选项
 target_compile_options(server_client_test PRIVATE -g -O0)
+
+# ==================== 测试 2: kqueue 核心机制测试 ====================
+add_executable(test_kqueue_core
+    test_kqueue_core.cpp
+)
+target_compile_options(test_kqueue_core PRIVATE -g -O0)
+
+# ==================== 测试 3: 高并发压力测试 ====================
+add_executable(test_stress_concurrency
+    test_stress_concurrency.cpp
+    ${NETWORK_SOURCES}
+)
+target_compile_options(test_stress_concurrency PRIVATE -O2)  # 压力测试使用优化
+
+# ==================== 测试目标 ====================
+# 自定义测试目标，支持运行不同类型的测试
+add_custom_target(test_small
+    COMMAND test_stress_concurrency small
+    DEPENDS test_stress_concurrency
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running small-scale stress test (100 connections)"
+)
+
+add_custom_target(test_medium
+    COMMAND test_stress_concurrency medium
+    DEPENDS test_stress_concurrency
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running medium-scale stress test (1000 connections)"
+)
+
+add_custom_target(test_large
+    COMMAND test_stress_concurrency large
+    DEPENDS test_stress_concurrency
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running large-scale stress test (10000 connections)"
+)
+
+add_custom_target(test_extreme
+    COMMAND test_stress_concurrency extreme
+    DEPENDS test_stress_concurrency
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running extreme-scale stress test (50000 connections)"
+)
+
+# kqueue 核心测试
+add_custom_target(test_kqueue
+    COMMAND test_kqueue_core
+    DEPENDS test_kqueue_core
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running kqueue core mechanism tests"
+)
+
+# 综合测试
+add_custom_target(test_all
+    COMMAND test_kqueue_core
+    COMMAND server_client_test all
+    COMMAND test_stress_concurrency small
+    DEPENDS test_kqueue_core server_client_test test_stress_concurrency
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running all tests"
+)

@@ -75,7 +75,7 @@ bool TestIPv4() {
                 << ", " << message << std::endl;
     });
 
-    if (!server.StartIPv4("127.0.0.1", 9999, 10)) {
+    if (!server.StartIPv4("127.0.0.1", 9999)) {
       std::cerr << "[Server-IPv4] 启动失败!" << std::endl;
       test_done = true;
       return;
@@ -219,7 +219,7 @@ bool TestIPv6() {
                 << ", " << message << std::endl;
     });
 
-    if (!server.StartIPv6("::1", 9998, 10)) {
+    if (!server.StartIPv6("::1", 9998)) {
       std::cerr << "[Server-IPv6] 启动失败!" << std::endl;
       test_done = true;
       return;
@@ -364,7 +364,7 @@ bool TestUnixDomain() {
                 << ", " << message << std::endl;
     });
 
-    if (!server.StartUnixDomain(socket_path, 10)) {
+    if (!server.StartUnixDomain(socket_path)) {
       std::cerr << "[Server-UDS] 启动失败!" << std::endl;
       test_done = true;
       return;

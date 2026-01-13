@@ -25,6 +25,11 @@
 #include "reactor.h"
 #include "acceptor.h"
 
+// SOMAXCONN 可能在某些系统上未定义
+#ifndef SOMAXCONN
+#define SOMAXCONN 128
+#endif
+
 namespace darwincore {
 namespace network {
 
@@ -42,21 +47,16 @@ Acceptor::~Acceptor() {
   }
 }
 
-bool Acceptor::ListenIPv4(const std::string& host,
-                          uint16_t port,
-                          int backlog) {
-  return ListenGeneric(SocketProtocol::kIPv4, host, port, backlog);
+bool Acceptor::ListenIPv4(const std::string& host, uint16_t port) {
+  return ListenGeneric(SocketProtocol::kIPv4, host, port);
 }
 
-bool Acceptor::ListenIPv6(const std::string& host,
-                          uint16_t port,
-                          int backlog) {
-  return ListenGeneric(SocketProtocol::kIPv6, host, port, backlog);
+bool Acceptor::ListenIPv6(const std::string& host, uint16_t port) {
+  return ListenGeneric(SocketProtocol::kIPv6, host, port);
 }
 
-bool Acceptor::ListenUnixDomain(const std::string& path,
-                                int backlog) {
-  return ListenGeneric(SocketProtocol::kUnixDomain, path, 0, backlog);
+bool Acceptor::ListenUnixDomain(const std::string& path) {
+  return ListenGeneric(SocketProtocol::kUnixDomain, path, 0);
 }
 
 void Acceptor::SetReactors(const std::vector<std::weak_ptr<Reactor>>& reactors) {
@@ -89,8 +89,7 @@ bool Acceptor::IsRunning() const {
 
 bool Acceptor::ListenGeneric(SocketProtocol protocol,
                             const std::string& host,
-                            uint16_t port,
-                            int backlog) {
+                            uint16_t port) {
   // 创建 Socket
   int fd = SocketHelper::CreateSocket(protocol);
   if (fd < 0) {
@@ -105,7 +104,7 @@ bool Acceptor::ListenGeneric(SocketProtocol protocol,
     return false;
   }
 
-  // 设置 SO_REUSEADDR
+  // 设置 SO_REUSEADDR (允许端口快速重用)
   int opt = 1;
   if (!SocketHelper::SetSocketOption(fd, SOL_SOCKET, SO_REUSEADDR,
                                      &opt, sizeof(opt))) {
@@ -114,10 +113,12 @@ bool Acceptor::ListenGeneric(SocketProtocol protocol,
     return false;
   }
 
-  // 设置 SO_REUSEPORT (可选)
+  // 设置 SO_REUSEPORT (允许多个 socket 监听同一端口)
+  // 这对于负载均衡和多进程很有用
   if (!SocketHelper::SetSocketOption(fd, SOL_SOCKET, SO_REUSEPORT,
                                      &opt, sizeof(opt))) {
     // 忽略失败，SO_REUSEPORT 不是所有平台都支持
+    NW_LOG_DEBUG("[Acceptor::ListenGeneric] SO_REUSEPORT 设置失败（可能不支持）");
   }
 
   // 解析并绑定地址
@@ -157,13 +158,21 @@ bool Acceptor::ListenGeneric(SocketProtocol protocol,
   }
 
   // 开始监听
-  if (listen(fd, backlog) < 0) {
+  // 使用系统默认的 backlog (SOMAXCONN)
+  // 这已经是平台优化的值，通常在 128-4096 之间
+  if (listen(fd, SOMAXCONN) < 0) {
     NW_LOG_ERROR("[Acceptor::ListenGeneric] listen 失败: " << strerror(errno) << ", fd=" << fd);
     close(fd);
     return false;
   }
 
   listen_fd_ = fd;
+  NW_LOG_INFO("[Acceptor::ListenGeneric] 监听成功: fd=" << fd
+             << ", backlog=" << SOMAXCONN
+             << ", SO_REUSEADDR=1"
+             << ", SO_REUSEPORT=1"
+             << ", protocol=" << static_cast<int>(protocol));
+
   is_running_ = true;
   accept_thread_ = std::thread(&Acceptor::AcceptLoop, this);
 

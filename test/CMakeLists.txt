@@ -90,6 +90,21 @@ add_custom_target(test_kqueue
     COMMENT "Running kqueue core mechanism tests"
 )
 
+# ==================== 测试 4: SIGPIPE 处理测试 ====================
+add_executable(test_sigpipe
+    test_sigpipe.cpp
+    ${NETWORK_SOURCES}
+)
+target_compile_options(test_sigpipe PRIVATE -g -O0)
+
+# SIGPIPE 测试
+add_custom_target(test_sigpipe_run
+    COMMAND test_sigpipe
+    DEPENDS test_sigpipe
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running SIGPIPE handling test"
+)
+
 # 综合测试
 add_custom_target(test_all
     COMMAND test_kqueue_core

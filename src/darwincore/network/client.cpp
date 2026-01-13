@@ -16,6 +16,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstring>
+#include <csignal>
+#include <mutex>
 
 #include <darwincore/network/configuration.h>
 #include <darwincore/network/logger.h>
@@ -64,6 +66,13 @@ private:
 };
 
 Client::Impl::Impl() : connection_id_(0), is_connected_(false) {
+  // 全局忽略 SIGPIPE（只需设置一次）
+  // 避免向已关闭的 socket 写入时进程崩溃
+  static std::once_flag sigpipe_flag;
+  std::call_once(sigpipe_flag, []() {
+    signal(SIGPIPE, SIG_IGN);
+  });
+
   memset(&peer_address_, 0, sizeof(peer_address_));
   NW_LOG_TRACE("[Client::Impl] 构造函数完成");
 }

@@ -77,41 +77,38 @@ public:
    * @brief 启动 IPv4 监听
    * @param host 监听地址（如 "0.0.0.0"）
    * @param port 监听端口
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 创建 IPv4 socket 并开始监听。
+   * 使用系统默认的 backlog (SOMAXCONN)。
+   * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    * 新连接会自动分配给 Reactor，通过 kConnected 事件通知。
    */
-  bool ListenIPv4(const std::string& host,
-                  uint16_t port,
-                  int backlog);
+  bool ListenIPv4(const std::string& host, uint16_t port);
 
   /**
    * @brief 启动 IPv6 监听
    * @param host 监听地址（如 "::"）
    * @param port 监听端口
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 创建 IPv6 socket 并开始监听。
+   * 使用系统默认的 backlog (SOMAXCONN)。
    * 设置 IPV6_V6ONLY=1，不接收 IPv4 映射连接。
+   * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    */
-  bool ListenIPv6(const std::string& host,
-                  uint16_t port,
-                  int backlog);
+  bool ListenIPv6(const std::string& host, uint16_t port);
 
   /**
    * @brief 启动 Unix Domain Socket 监听
    * @param path Socket 文件路径（绝对路径推荐）
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 创建 Unix Domain Socket 并开始监听。
+   * 使用系统默认的 backlog (SOMAXCONN)。
    * 如果路径长度超过 sun_path 上限，会使用受控 chdir 策略。
    */
-  bool ListenUnixDomain(const std::string& path,
-                        int backlog);
+  bool ListenUnixDomain(const std::string& path);
 
   // ==================== 设置 Reactor 线程池 ====================
 
@@ -149,13 +146,14 @@ private:
    * @param protocol Socket 协议类型
    * @param host 监听地址
    * @param port 监听端口（Unix Domain 时为 0）
-   * @param backlog 监听队列长度
    * @return 启动成功返回 true，失败返回 false
+   *
+   * 使用系统默认的 backlog (SOMAXCONN)。
+   * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    */
   bool ListenGeneric(SocketProtocol protocol,
                      const std::string& host,
-                     uint16_t port,
-                     int backlog);
+                     uint16_t port);
 
   /**
    * @brief Accept 线程的主循环

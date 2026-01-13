@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <unistd.h>
+#include <csignal>
+#include <mutex>
 
 #include <darwincore/network/configuration.h>
 #include <darwincore/network/logger.h>
@@ -26,10 +28,10 @@ public:
   Impl();
   ~Impl();
 
-  bool StartIPv4(const std::string& host, uint16_t port, int backlog);
-  bool StartIPv6(const std::string& host, uint16_t port, int backlog);
-  bool StartUniversalIP(const std::string& host, uint16_t port, int backlog);
-  bool StartUnixDomain(const std::string& path, int backlog);
+  bool StartIPv4(const std::string& host, uint16_t port);
+  bool StartIPv6(const std::string& host, uint16_t port);
+  bool StartUniversalIP(const std::string& host, uint16_t port);
+  bool StartUnixDomain(const std::string& path);
   void Stop();
 
   bool SendData(uint64_t connection_id, const uint8_t* data, size_t size);
@@ -57,7 +59,14 @@ private:
   Server::OnConnectionErrorCallback on_connection_error_;
 };
 
-Server::Impl::Impl() {}
+Server::Impl::Impl() {
+  // 全局忽略 SIGPIPE（只需设置一次）
+  // 避免向已关闭的 socket 写入时进程崩溃
+  static std::once_flag sigpipe_flag;
+  std::call_once(sigpipe_flag, []() {
+    signal(SIGPIPE, SIG_IGN);
+  });
+}
 
 Server::Impl::~Impl() {
   Stop();
@@ -96,8 +105,7 @@ bool Server::Impl::InitializeReactors() {
   return true;
 }
 
-bool Server::Impl::StartIPv4(const std::string& host, uint16_t port,
-                                     int backlog) {
+bool Server::Impl::StartIPv4(const std::string& host, uint16_t port) {
   if (!InitializeWorkerPool() || !InitializeReactors()) {
     NW_LOG_ERROR("[Server::StartIPv4] 初始化失败");
     return false;
@@ -120,15 +128,14 @@ bool Server::Impl::StartIPv4(const std::string& host, uint16_t port,
     OnNetworkEvent(event);
   });
 
-  bool success = acceptor->ListenIPv4(host, port, backlog);
+  bool success = acceptor->ListenIPv4(host, port);
   if (success) {
     acceptors_.push_back(std::move(acceptor));
   }
   return success;
 }
 
-bool Server::Impl::StartIPv6(const std::string& host, uint16_t port,
-                                     int backlog) {
+bool Server::Impl::StartIPv6(const std::string& host, uint16_t port) {
   if (!InitializeWorkerPool() || !InitializeReactors()) {
     NW_LOG_ERROR("[Server::StartIPv6] 初始化失败");
     return false;
@@ -151,23 +158,21 @@ bool Server::Impl::StartIPv6(const std::string& host, uint16_t port,
     OnNetworkEvent(event);
   });
 
-  bool success = acceptor->ListenIPv6(host, port, backlog);
+  bool success = acceptor->ListenIPv6(host, port);
   if (success) {
     acceptors_.push_back(std::move(acceptor));
   }
   return success;
 }
 
-bool Server::Impl::StartUniversalIP(const std::string& host,
-                                           uint16_t port,
-                                           int backlog) {
+bool Server::Impl::StartUniversalIP(const std::string& host, uint16_t port) {
   // 双栈监听：先启动 IPv4，再启动 IPv6
-  bool ipv4_success = StartIPv4(host, port, backlog);
-  bool ipv6_success = StartIPv6(host, port, backlog);
+  bool ipv4_success = StartIPv4(host, port);
+  bool ipv6_success = StartIPv6(host, port);
   return ipv4_success && ipv6_success;
 }
 
-bool Server::Impl::StartUnixDomain(const std::string& path, int backlog) {
+bool Server::Impl::StartUnixDomain(const std::string& path) {
   if (!InitializeWorkerPool() || !InitializeReactors()) {
     NW_LOG_ERROR("[Server::StartUnixDomain] 初始化失败");
     return false;
@@ -190,7 +195,7 @@ bool Server::Impl::StartUnixDomain(const std::string& path, int backlog) {
     OnNetworkEvent(event);
   });
 
-  bool success = acceptor->ListenUnixDomain(path, backlog);
+  bool success = acceptor->ListenUnixDomain(path);
   if (success) {
     acceptors_.push_back(std::move(acceptor));
   }
@@ -277,23 +282,20 @@ Server::Server() : impl_(std::make_unique<Impl>()) {}
 
 Server::~Server() = default;
 
-bool Server::StartIPv4(const std::string& host, uint16_t port,
-                              int backlog) {
-  return impl_->StartIPv4(host, port, backlog);
+bool Server::StartIPv4(const std::string& host, uint16_t port) {
+  return impl_->StartIPv4(host, port);
 }
 
-bool Server::StartIPv6(const std::string& host, uint16_t port,
-                              int backlog) {
-  return impl_->StartIPv6(host, port, backlog);
+bool Server::StartIPv6(const std::string& host, uint16_t port) {
+  return impl_->StartIPv6(host, port);
 }
 
-bool Server::StartUniversalIP(const std::string& host, uint16_t port,
-                                     int backlog) {
-  return impl_->StartUniversalIP(host, port, backlog);
+bool Server::StartUniversalIP(const std::string& host, uint16_t port) {
+  return impl_->StartUniversalIP(host, port);
 }
 
-bool Server::StartUnixDomain(const std::string& path, int backlog) {
-  return impl_->StartUnixDomain(path, backlog);
+bool Server::StartUnixDomain(const std::string& path) {
+  return impl_->StartUnixDomain(path);
 }
 
 void Server::Stop() {

@@ -3,7 +3,14 @@
     "allow": [
       "Bash(./server_client_test:*)",
       "Bash(make:*)",
-      "Bash(1)"
+      "Bash(1)",
+      "Bash(chmod:*)",
+      "Bash(./test_kqueue_core:*)",
+      "Bash(cmake:*)",
+      "Bash(./test_stress_concurrency small)",
+      "Bash(./build.sh:*)",
+      "Bash(g++:*)",
+      "Bash(./test_sigpipe)"
     ]
   }
 }

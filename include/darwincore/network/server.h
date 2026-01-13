@@ -120,56 +120,51 @@ public:
    * @brief 启动 IPv4 服务器
    * @param host 监听地址（如 "0.0.0.0" 表示所有接口）
    * @param port 监听端口
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 使用 IPv4 socket 监听指定地址和端口。
+   * 使用系统默认的 backlog (SOMAXCONN)。
+   * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    * 如果服务器已启动，此方法会失败。
    */
-  bool StartIPv4(const std::string& host,
-                 uint16_t port,
-                 int backlog = 128);
+  bool StartIPv4(const std::string& host, uint16_t port);
 
   /**
    * @brief 启动 IPv6 服务器
    * @param host 监听地址（如 "::" 表示所有接口）
    * @param port 监听端口
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 使用 IPv6 socket 监听指定地址和端口。
-   * 设置了 IPV6_V6ONLY=1，不接收 IPv4 映射连接。
+   * 使用系统默认的 backlog (SOMAXCONN)。
+   * 设置 IPV6_V6ONLY=1，不接收 IPv4 映射连接。
+   * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    */
-  bool StartIPv6(const std::string& host,
-                 uint16_t port,
-                 int backlog = 128);
+  bool StartIPv6(const std::string& host, uint16_t port);
 
   /**
    * @brief 启动双栈服务器（IPv4 + IPv6）
    * @param host 监听地址
    * @param port 监听端口
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 创建两个独立的 socket（一个 IPv4，一个 IPv6）同时监听。
    * 各自独立接受连接，由 Reactor 线程池管理。
+   * 使用系统默认的 backlog (SOMAXCONN)。
    */
-  bool StartUniversalIP(const std::string& host,
-                        uint16_t port,
-                        int backlog = 128);
+  bool StartUniversalIP(const std::string& host, uint16_t port);
 
   /**
    * @brief 启动 Unix Domain Socket 服务器
    * @param path Socket 文件路径（绝对路径推荐）
-   * @param backlog 监听队列长度（默认 128）
    * @return 启动成功返回 true，失败返回 false
    *
    * 创建 Unix Domain Socket 并绑定到指定路径。
+   * 使用系统默认的 backlog (SOMAXCONN)。
    * 如果路径长度超过 sun_path 上限（104 bytes），
    * 会自动使用受控 chdir 策略处理。
    */
-  bool StartUnixDomain(const std::string& path,
-                       int backlog = 128);
+  bool StartUnixDomain(const std::string& path);
 
   /**
    * @brief 停止服务器

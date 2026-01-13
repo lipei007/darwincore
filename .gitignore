@@ -15,6 +15,8 @@ cmake-build-*/
 *.swo
 *~
 .DS_Store
+.claude/
+.cache/
 
 # Xcode
 *.xcodeproj/

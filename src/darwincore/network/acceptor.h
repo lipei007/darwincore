@@ -20,10 +20,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <thread>
 #include <sys/socket.h>
+#include <thread>
 
-#include <darwincore/network/configuration.h>  // 对外头文件
+#include <darwincore/network/configuration.h> // 对外头文件
 
 namespace darwincore {
 namespace network {
@@ -68,8 +68,8 @@ public:
   ~Acceptor();
 
   // 禁止拷贝和移动
-  Acceptor(const Acceptor&) = delete;
-  Acceptor& operator=(const Acceptor&) = delete;
+  Acceptor(const Acceptor &) = delete;
+  Acceptor &operator=(const Acceptor &) = delete;
 
   // ==================== 启动监听 ====================
 
@@ -84,7 +84,7 @@ public:
    * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    * 新连接会自动分配给 Reactor，通过 kConnected 事件通知。
    */
-  bool ListenIPv4(const std::string& host, uint16_t port);
+  bool ListenIPv4(const std::string &host, uint16_t port);
 
   /**
    * @brief 启动 IPv6 监听
@@ -97,7 +97,7 @@ public:
    * 设置 IPV6_V6ONLY=1，不接收 IPv4 映射连接。
    * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    */
-  bool ListenIPv6(const std::string& host, uint16_t port);
+  bool ListenIPv6(const std::string &host, uint16_t port);
 
   /**
    * @brief 启动 Unix Domain Socket 监听
@@ -108,7 +108,7 @@ public:
    * 使用系统默认的 backlog (SOMAXCONN)。
    * 如果路径长度超过 sun_path 上限，会使用受控 chdir 策略。
    */
-  bool ListenUnixDomain(const std::string& path);
+  bool ListenUnixDomain(const std::string &path);
 
   // ==================== 设置 Reactor 线程池 ====================
 
@@ -122,7 +122,7 @@ public:
    *   - Server 作为 Owner 掌控 Reactor 销毁时机
    *   - 使用前必须通过 lock() 检查 Reactor 是否仍然有效
    */
-  void SetReactors(const std::vector<std::weak_ptr<Reactor>>& reactors);
+  void SetReactors(const std::vector<std::weak_ptr<Reactor>> &reactors);
 
   // ==================== 停止监听 ====================
 
@@ -151,8 +151,7 @@ private:
    * 使用系统默认的 backlog (SOMAXCONN)。
    * 自动设置 SO_REUSEADDR 和 SO_REUSEPORT。
    */
-  bool ListenGeneric(SocketProtocol protocol,
-                     const std::string& host,
+  bool ListenGeneric(SocketProtocol protocol, const std::string &host,
                      uint16_t port);
 
   /**
@@ -167,19 +166,19 @@ private:
    * @param fd 新连接的文件描述符
    * @param peer 客户端地址
    */
-  void AssignToReactor(int fd, const sockaddr_storage& peer);
+  void AssignToReactor(int fd, const sockaddr_storage &peer);
 
 private:
-  int listen_fd_;                                    ///< 监听 Socket 文件描述符
-  IOMonitor* io_monitor_;                             ///< IO 监控器（内部管理）
-  std::thread accept_thread_;                        ///< Accept 线程
-  bool is_running_;                                 ///< 运行状态
+  int listen_fd_;                         ///< 监听 Socket 文件描述符
+  std::unique_ptr<IOMonitor> io_monitor_; ///< IO 监控器（智能指针管理）
+  std::thread accept_thread_;             ///< Accept 线程
+  std::atomic<bool> is_running_{false}; ///< 运行状态
 
-  std::vector<std::weak_ptr<Reactor>> reactors_;    ///< Reactor 线程池（weak_ptr，非 owning）
-  std::atomic<size_t> next_reactor_index_;          ///< 下一个分配的 Reactor 索引（轮询）
+  std::vector<std::weak_ptr<Reactor>> reactors_; ///< Reactor 线程池（weak_ptr，非 owning）
+  std::atomic<size_t> next_reactor_index_; ///< 下一个分配的 Reactor 索引（轮询）
 };
 
-}  // namespace network
-}  // namespace darwincore
+} // namespace network
+} // namespace darwincore
 
-#endif  // DARWINCORE_NETWORK_ACCEPTOR_H
+#endif // DARWINCORE_NETWORK_ACCEPTOR_H

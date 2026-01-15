@@ -12,9 +12,9 @@
 #ifndef DARWINCORE_NETWORK_IO_MONITOR_H
 #define DARWINCORE_NETWORK_IO_MONITOR_H
 
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <cerrno>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/event.h>
@@ -44,8 +44,8 @@ public:
   ~IOMonitor();
 
   // 禁止拷贝和移动
-  IOMonitor(const IOMonitor&) = delete;
-  IOMonitor& operator=(const IOMonitor&) = delete;
+  IOMonitor(const IOMonitor &) = delete;
+  IOMonitor &operator=(const IOMonitor &) = delete;
 
   /**
    * @brief 初始化监控器
@@ -66,6 +66,20 @@ public:
   bool StartReadMonitor(int fd);
 
   /**
+   * @brief 开始监控文件描述符的写事件
+   * @param fd 要监控的文件描述符
+   * @return true 成功, false 失败
+   */
+  bool StartWriteMonitor(int fd);
+
+  /**
+   * @brief 停止监控文件描述符的写事件
+   * @param fd 要停止监控的文件描述符
+   * @return true 成功, false 失败
+   */
+  bool StopWriteMonitor(int fd);
+
+  /**
    * @brief 停止监控文件描述符
    * @param fd 要停止监控的文件描述符
    * @return true 成功, false 失败
@@ -79,7 +93,7 @@ public:
    * @param timeout_ms 超时时间（毫秒），nullptr 表示无限等待
    * @return 返回的事件数量，-1 表示错误
    */
-  int WaitEvents(void* events, int max_events, const int* timeout_ms);
+  int WaitEvents(void *events, int max_events, const int *timeout_ms);
 
   /**
    * @brief 获取监控器的文件描述符
@@ -88,11 +102,11 @@ public:
   int GetFd() const { return monitor_fd_; }
 
 private:
-  int monitor_fd_;              ///< kqueue_fd 或 epoll_fd
-  int timeout_ms_;             ///< 默认超时时间（毫秒）
+  int monitor_fd_; ///< kqueue_fd 或 epoll_fd
+  int timeout_ms_; ///< 默认超时时间（毫秒）
 };
 
-}  // namespace network
-}  // namespace darwincore
+} // namespace network
+} // namespace darwincore
 
-#endif  // DARWINCORE_NETWORK_IO_MONITOR_H
+#endif // DARWINCORE_NETWORK_IO_MONITOR_H

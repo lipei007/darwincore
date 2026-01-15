@@ -41,13 +41,13 @@ target_compile_options(server_client_test PRIVATE -g -O0)
 
 # ==================== 测试 2: kqueue 核心机制测试 ====================
 add_executable(test_kqueue_core
-    test_kqueue_core.cpp
+    test_kqueue_core.cc
 )
 target_compile_options(test_kqueue_core PRIVATE -g -O0)
 
 # ==================== 测试 3: 高并发压力测试 ====================
 add_executable(test_stress_concurrency
-    test_stress_concurrency.cpp
+    test_stress_concurrency.cc
     ${NETWORK_SOURCES}
 )
 target_compile_options(test_stress_concurrency PRIVATE -O2)  # 压力测试使用优化
@@ -92,7 +92,7 @@ add_custom_target(test_kqueue
 
 # ==================== 测试 4: SIGPIPE 处理测试 ====================
 add_executable(test_sigpipe
-    test_sigpipe.cpp
+    test_sigpipe.cc
     ${NETWORK_SOURCES}
 )
 target_compile_options(test_sigpipe PRIVATE -g -O0)

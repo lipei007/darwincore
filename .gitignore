@@ -40,10 +40,6 @@ compile_commands.json
 *.dll
 *.exe
 
-# Test executables
-test_*
-*_test
-
 # Temporary files
 *.tmp
 *.bak

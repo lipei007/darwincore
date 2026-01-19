@@ -171,9 +171,10 @@ namespace darwincore
         return false;
       }
 
-      struct kevent change;
-      EV_SET(&change, fd, EVFILT_READ, EV_DELETE | EV_DISABLE, 0, 0, nullptr);
-      int ret = kevent(kqueue_fd_, &change, 1, nullptr, 0, nullptr);
+      struct kevent change[2];
+      EV_SET(&change[0], fd, EVFILT_READ, EV_DELETE | EV_DISABLE, 0, 0, nullptr);
+      EV_SET(&change[1], fd, EVFILT_WRITE, EV_DELETE | EV_DISABLE, 0, 0, nullptr);
+      int ret = kevent(kqueue_fd_, change, 2, nullptr, 0, nullptr);
 
       if (ret < 0)
       {

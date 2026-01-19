@@ -113,6 +113,11 @@ namespace darwincore
         event_loop_thread_.join();
       }
 
+      // 先关闭 kqueue，移除所有监控
+      if (io_monitor_) {
+        io_monitor_->Close();
+      }
+
       // 关闭所有连接
       CleanupAllConnections();
 

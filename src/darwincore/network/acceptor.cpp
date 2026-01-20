@@ -24,6 +24,7 @@
 #include "socket_helper.h"
 #include <darwincore/network/configuration.h>
 #include <darwincore/network/logger.h>
+#include <pthread.h>
 
 // SOMAXCONN 可能在某些系统上未定义
 #ifndef SOMAXCONN
@@ -38,7 +39,7 @@ namespace darwincore
         : listen_fd_(-1), io_monitor_(std::make_unique<IOMonitor>()),
           next_reactor_index_(0), is_running_(false)
     {
-      io_monitor_->Initialize();
+      
     }
 
     Acceptor::~Acceptor()
@@ -128,6 +129,14 @@ namespace darwincore
     bool Acceptor::ListenGeneric(SocketProtocol protocol, const std::string &host,
                                  uint16_t port)
     {
+
+      if (!io_monitor_->Initialize())
+      {
+        NW_LOG_ERROR("[Acceptor::ListenGeneric] io_monitor_ 初始化失败");
+        return false
+      }
+      
+
       // 创建 Socket
       int fd = SocketHelper::CreateSocket(protocol);
       if (fd < 0)
@@ -155,8 +164,7 @@ namespace darwincore
 
       // 设置 SO_REUSEPORT (允许多个 socket 监听同一端口)
       // 这对于负载均衡和多进程很有用
-      bool reuseport_set = SocketHelper::SetSocketOption(
-          fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+      bool reuseport_set = SocketHelper::SetSocketOption(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
       if (!reuseport_set)
       {
         // 忽略失败，SO_REUSEPORT 不是所有平台都支持
@@ -215,6 +223,7 @@ namespace darwincore
         return false;
       }
 
+      protocol_ = protocol;
       listen_fd_ = fd;
       NW_LOG_INFO("[Acceptor::ListenGeneric] 监听成功: fd="
                   << fd << ", backlog=" << SOMAXCONN << ", SO_REUSEADDR=1"
@@ -229,6 +238,7 @@ namespace darwincore
 
     void Acceptor::AcceptLoop()
     {
+      pthread_setname_np(("darwincore.network.acceptor" + std::to_string(protocol_)).c_str());
       NW_LOG_DEBUG("[Acceptor::AcceptLoop] AcceptLoop 启动，listen_fd=" << listen_fd_);
 
       if (!io_monitor_)
@@ -264,8 +274,7 @@ namespace darwincore
             NW_LOG_TRACE("[Acceptor::AcceptLoop] 被信号中断，继续等待");
             continue; // 被信号中断
           }
-          NW_LOG_ERROR(
-              "[Acceptor::AcceptLoop] WaitEvents 出错: " << strerror(errno));
+          NW_LOG_ERROR("[Acceptor::AcceptLoop] WaitEvents 出错: " << strerror(errno));
           // 记录错误但继续运行，除非是严重错误
           if (errno == EBADF || errno == EFAULT)
           {
@@ -288,9 +297,9 @@ namespace darwincore
           if (fd == listen_fd_)
           {
             // 批量接受连接，提高性能
-            // 在一次事件触发中尽可能多地接受连接
-            const int kMaxAcceptPerLoop = 16;
-            for (int j = 0; j < kMaxAcceptPerLoop; ++j)
+            // 基于时间片，在一次事件触发中尽可能多地接受连接
+            auto start = std::chrono::steady_clock::now();
+            while(is_running_.load())
             {
               sockaddr_storage peer_addr = {};
               socklen_t peer_len = sizeof(peer_addr);
@@ -339,6 +348,14 @@ namespace darwincore
 
               // 将新连接分配给 Reactor
               AssignToReactor(client_fd, peer_addr);
+
+              auto end = std::chrono::steady_clock::now();
+              if (end - start > 200us)
+              {
+                break;
+              }
+              
+
             }
           }
         }
@@ -360,8 +377,7 @@ namespace darwincore
       if (reactors_.empty())
       {
         // 如果没有配置 Reactor，无法处理此连接
-        NW_LOG_ERROR(
-            "[Acceptor::AssignToReactor] reactors_.empty()，关闭 fd=" << fd);
+        NW_LOG_ERROR("[Acceptor::AssignToReactor] reactors_.empty()，关闭 fd=" << fd);
         close(fd);
         return;
       }

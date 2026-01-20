@@ -169,6 +169,7 @@ private:
   void AssignToReactor(int fd, const sockaddr_storage &peer);
 
 private:
+  SocketProtocol protocol_;               ///< Socket 协议类型
   int listen_fd_;                         ///< 监听 Socket 文件描述符
   std::string unix_socket_path_;          ///< Unix 域套接字路径  
   std::unique_ptr<IOMonitor> io_monitor_; ///< IO 监控器（智能指针管理）

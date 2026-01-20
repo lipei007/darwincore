@@ -19,6 +19,7 @@
 #include <ctime>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "io_monitor.h"
 #include "reactor.h"
@@ -64,7 +65,7 @@ namespace darwincore
       {
         throw std::runtime_error("Failed to create IOMonitor");
       }
-      io_monitor_->Initialize();
+      
     }
 
     Reactor::~Reactor()
@@ -74,6 +75,12 @@ namespace darwincore
 
     bool Reactor::Start()
     {
+
+      if (!io_monitor_->Initialize()) {
+        NW_LOG_ERROR("[Reactor" << reactor_id_ << "] 初始化 IOMonitor 失败");
+        return false;
+      }
+
       bool expected = false;
       if (!is_running_.compare_exchange_strong(expected, true))
       {
@@ -344,8 +351,8 @@ namespace darwincore
       ReactorConnection &conn = it->second;
       int fd = conn.file_descriptor;
 
-      // 更新活跃时间
-      conn.UpdateActivity();
+      // 更新活跃时间(收到消息才算活跃)
+      // conn.UpdateActivity();
 
       // 如果缓冲区非空，直接追加（避免乱序）
       if (!conn.send_buffer.IsEmpty())
@@ -449,6 +456,7 @@ namespace darwincore
 
     void Reactor::RunEventLoop()
     {
+      pthread_setname_np(("darwincore.network.reactor." + std::to_string(reactor_id_)).c_str();
       const int kEventBatchSize = SocketConfiguration::kDefaultEventBatchSize;
       auto last_timeout_check = std::chrono::steady_clock::now();
 
@@ -697,6 +705,7 @@ namespace darwincore
       uint64_t connection_id = conn.connection_id;
 
       DispatchErrorEvent(connection_id, error_code);
+      DispatchDisconnectEvent(connection_id);
       DoRemoveConnection(connection_id);
     }
 

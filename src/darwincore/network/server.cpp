@@ -116,8 +116,9 @@ namespace darwincore
       static std::once_flag sigpipe_flag;
       std::call_once(sigpipe_flag, []()
                      {
-    signal(SIGPIPE, SIG_IGN);
-    NW_LOG_INFO("[Server] SIGPIPE 已忽略"); });
+                      signal(SIGPIPE, SIG_IGN);
+                      NW_LOG_INFO("[Server] SIGPIPE 已忽略"); 
+                    });
     }
 
     Server::Impl::~Impl()
@@ -161,9 +162,12 @@ namespace darwincore
       // 设置事件回调（只设置一次）
       worker_pool_->SetEventCallback([this](const NetworkEvent &event)
                                      {
-    NW_LOG_TRACE("[Server] 收到事件: type=" << static_cast<int>(event.type)
-                                            << ", conn_id=" << event.connection_id);
-    OnNetworkEvent(event); });
+                                      NW_LOG_TRACE("[Server] 收到事件: type=" 
+                                        << static_cast<int>(event.type)    
+                                        << ", conn_id=" << event.connection_id);
+        
+                                        OnNetworkEvent(event); 
+                                      });
 
       return true;
     }

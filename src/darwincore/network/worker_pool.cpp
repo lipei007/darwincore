@@ -15,6 +15,7 @@
 #include "worker_pool.h"
 #include <darwincore/network/configuration.h>
 #include <darwincore/network/logger.h>
+#include <pthread.h>
 
 namespace darwincore
 {
@@ -147,6 +148,8 @@ namespace darwincore
 
     void WorkerPool::WorkerLoop(int worker_id)
     {
+      pthread_setname_np(("darwincore.network.worker." + std::to_string(worker_id)).c_str());
+
       auto &queue = event_queues_[worker_id];
       NW_LOG_DEBUG("[WorkerPool] Worker " << worker_id << " 启动");
 

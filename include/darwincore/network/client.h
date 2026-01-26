@@ -141,10 +141,37 @@ public:
   bool ConnectUnixDomain(const std::string& path);
 
   /**
-   * @brief 断开连接
+   * @brief 优雅关闭连接（等待发送缓冲区清空）
+   * @param timeout_ms 超时时间（毫秒），0表示无限等待
+   * @return 成功返回 true，超时返回 false
+   *
+   * 此方法会：
+   * 1. 停止接受新的SendData调用
+   * 2. 等待SendBuffer中的数据发送完成
+   * 3. 关闭连接
+   *
+   * 正确的使用模式：
+   * @code
+   *   // 1. 用户代码先停止发送源（如定时器、发送线程）
+   *   stop_sending.store(true);
+   *   sender_thread.join();
+   *
+   *   // 2. 调用GracefulShutdown等待SendBuffer清空
+   *   client.GracefulShutdown(5000);  // 等待最多5秒
+   *
+   *   // 3. Client内部会自动清理Reactor和WorkerPool
+   * @endcode
+   */
+  bool GracefulShutdown(int timeout_ms = 5000);
+
+  /**
+   * @brief 立即断开连接
    *
    * 关闭当前连接，清理资源。
    * 如果没有连接，此方法不执行任何操作。
+   *
+   * 注意：此方法会立即停止Reactor和WorkerPool，
+   *       调用前请确保已经停止所有发送操作。
    */
   void Disconnect();
 

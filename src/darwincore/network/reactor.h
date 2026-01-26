@@ -88,6 +88,13 @@ namespace darwincore
                     const uint8_t *data,
                     size_t size);
 
+      /**
+       * @brief 获取连接的发送缓冲区大小
+       * @param connection_id 连接ID
+       * @return 发送缓冲区大小（字节），连接不存在返回0
+       */
+      size_t GetSendBufferSize(uint64_t connection_id) const;
+
       void SetEventCallback(EventCallback callback);
 
       void SetConnectionTimeout(std::chrono::seconds timeout);

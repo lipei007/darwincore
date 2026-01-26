@@ -8,6 +8,8 @@
 #include <csignal>
 #include <mutex>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 #include <darwincore/network/logger.h>
 #include "socket_helper.h"
@@ -27,6 +29,7 @@ namespace darwincore::network
     bool ConnectIPv4(const std::string &, uint16_t);
     bool ConnectIPv6(const std::string &, uint16_t);
     bool ConnectUnixDomain(const std::string &);
+    bool GracefulShutdown(int timeout_ms);
     void Disconnect();
 
     bool SendData(const uint8_t *, size_t);
@@ -45,6 +48,9 @@ namespace darwincore::network
       kConnected,
       kClosing
     };
+
+    // 发送背压水位标记（字节）
+    static constexpr size_t SEND_HIGH_WATER_MARK = 4 * 1024 * 1024;  // 4MB
 
     bool ConnectInternal(int fd, const sockaddr *, socklen_t, bool is_tcp);
     bool InitReactor();
@@ -188,6 +194,47 @@ namespace darwincore::network
            ConnectInternal(fd, (sockaddr *)&addr, sizeof(addr), false);
   }
 
+  bool Client::Impl::GracefulShutdown(int timeout_ms)
+  {
+    State expected = State::kConnected;
+    if (!state_.compare_exchange_strong(expected, State::kClosing) &&
+        expected != State::kConnecting)
+      return false;
+
+    // 等待SendBuffer清空
+    auto start = std::chrono::steady_clock::now();
+    uint64_t conn_id = connection_id_.load();
+
+    while (reactor_)
+    {
+      size_t buffer_size = reactor_->GetSendBufferSize(conn_id);
+      if (buffer_size == 0)
+      {
+        NW_LOG_INFO("[Client] SendBuffer已清空，准备关闭连接");
+        break;
+      }
+
+      // 检查超时
+      if (timeout_ms > 0)
+      {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= timeout_ms)
+        {
+          NW_LOG_WARNING("[Client] GracefulShutdown超时: buffer_size=" << buffer_size);
+          return false;
+        }
+      }
+
+      // 短暂等待
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    Cleanup();
+    state_.store(State::kDisconnected);
+    return true;
+  }
+
   void Client::Impl::Disconnect()
   {
     State expected = State::kConnected;
@@ -218,6 +265,15 @@ namespace darwincore::network
   {
     if (state_.load() != State::kConnected || !reactor_)
       return false;
+
+    // 发送背压检查：如果发送缓冲区超过高水位，拒绝发送
+    size_t buffer_size = reactor_->GetSendBufferSize(connection_id_.load());
+    if (buffer_size > SEND_HIGH_WATER_MARK)
+    {
+      NW_LOG_WARNING("[Client] 发送背压触发: buffer_size=" << buffer_size
+                     << " > HIGH_WATER_MARK=" << SEND_HIGH_WATER_MARK);
+      return false;
+    }
 
     return reactor_->SendData(connection_id_.load(), data, size);
   }
@@ -298,6 +354,10 @@ namespace darwincore::network
   bool Client::ConnectUnixDomain(const std::string &p)
   {
     return impl_->ConnectUnixDomain(p);
+  }
+  bool Client::GracefulShutdown(int timeout_ms)
+  {
+    return impl_->GracefulShutdown(timeout_ms);
   }
   void Client::Disconnect() { impl_->Disconnect(); }
   bool Client::SendData(const uint8_t *d, size_t s)

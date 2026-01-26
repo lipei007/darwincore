@@ -208,6 +208,16 @@ namespace darwincore
       return pending_operations_.Enqueue(op);
     }
 
+    size_t Reactor::GetSendBufferSize(uint64_t connection_id) const
+    {
+      auto it = connections_.find(connection_id);
+      if (it == connections_.end())
+      {
+        return 0;
+      }
+      return it->second.send_buffer.Size();
+    }
+
     void Reactor::SetEventCallback(EventCallback callback)
     {
       event_callback_ = std::move(callback);

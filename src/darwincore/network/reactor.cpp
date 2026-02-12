@@ -81,6 +81,10 @@ namespace darwincore
         NW_LOG_ERROR("[Reactor" << reactor_id_ << "] 初始化 IOMonitor 失败");
         return false;
       }
+      if (!io_monitor_->InitializeWakeupEvent(kWakeupIdent)) {
+        NW_LOG_ERROR("[Reactor" << reactor_id_ << "] 初始化唤醒事件失败");
+        return false;
+      }
 
       bool expected = false;
       if (!is_running_.compare_exchange_strong(expected, true))
@@ -116,15 +120,9 @@ namespace darwincore
 
       // 先通知停止，这样事件循环会退出
       pending_operations_.NotifyStop();
-
-      // 立即关闭所有连接的fd，加速断开
-      for (auto &[conn_id, conn] : connections_)
+      if (io_monitor_)
       {
-        int fd = conn.file_descriptor;
-        if (fd >= 0)
-        {
-          shutdown(fd, SHUT_RDWR);
-        }
+        io_monitor_->TriggerWakeupEvent(kWakeupIdent);
       }
 
       if (event_loop_thread_.joinable())
@@ -147,69 +145,72 @@ namespace darwincore
 
     bool Reactor::AddConnection(int fd, const sockaddr_storage &peer)
     {
+      total_add_requests_.fetch_add(1, std::memory_order_relaxed);
+
       if (fd < 0)
       {
         NW_LOG_ERROR("[Reactor" << reactor_id_ << "] AddConnection: 无效 fd");
+        total_add_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
 
       if (!is_running_.load(std::memory_order_acquire))
       {
         NW_LOG_ERROR("[Reactor" << reactor_id_ << "] AddConnection: Reactor 未运行");
+        total_add_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
-
-      // 使用 Promise/Future 同步获取 connection_id
-      auto promise = std::make_shared<std::promise<uint64_t>>();
-      auto future = promise->get_future();
 
       Operation op;
       op.type = Operation::kAdd;
       op.fd = fd;
       op.peer = peer;
-      op.promise = promise;
 
       if (!pending_operations_.Enqueue(op))
       {
         NW_LOG_ERROR("[Reactor" << reactor_id_ << "] AddConnection: 队列已满");
+        total_add_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
-
-      try
-      {
-        // 等待 Reactor 线程处理完成
-        uint64_t conn_id = future.get();
-        return conn_id != 0;
-      }
-      catch (const std::exception &e)
-      {
-        NW_LOG_ERROR("[Reactor" << reactor_id_ << "] AddConnection 异常: " << e.what());
-        return false;
-      }
+      io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      return true;
     }
 
     bool Reactor::RemoveConnection(uint64_t connection_id)
     {
+      total_remove_requests_.fetch_add(1, std::memory_order_relaxed);
+
       if (!is_running_.load(std::memory_order_acquire))
       {
+        total_remove_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
 
       Operation op;
       op.type = Operation::kRemove;
       op.connection_id = connection_id;
-      return pending_operations_.Enqueue(op);
+      if (!pending_operations_.Enqueue(op))
+      {
+        total_remove_failures_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+      }
+      io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      return true;
     }
 
     bool Reactor::SendData(uint64_t connection_id, const uint8_t *data, size_t size)
     {
+      total_send_requests_.fetch_add(1, std::memory_order_relaxed);
+
       if (!data || size == 0)
       {
+        total_send_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
 
       if (!is_running_.load(std::memory_order_acquire))
       {
+        total_send_failures_.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
 
@@ -217,17 +218,44 @@ namespace darwincore
       op.type = Operation::kSend;
       op.connection_id = connection_id;
       op.data.assign(data, data + size);
-      return pending_operations_.Enqueue(op);
+      if (!pending_operations_.Enqueue(op))
+      {
+        total_send_failures_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+      }
+      io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      return true;
     }
 
-    size_t Reactor::GetSendBufferSize(uint64_t connection_id) const
+    size_t Reactor::GetSendBufferSize(uint64_t connection_id)
     {
-      auto it = connections_.find(connection_id);
-      if (it == connections_.end())
+      if (!is_running_.load(std::memory_order_acquire))
       {
         return 0;
       }
-      return it->second.send_buffer.Size();
+
+      auto promise = std::make_shared<std::promise<uint64_t>>();
+      auto future = promise->get_future();
+
+      Operation op;
+      op.type = Operation::kGetSendBufferSize;
+      op.connection_id = connection_id;
+      op.promise = promise;
+
+      if (!pending_operations_.Enqueue(op))
+      {
+        return 0;
+      }
+      io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+
+      try
+      {
+        return static_cast<size_t>(future.get());
+      }
+      catch (const std::exception &)
+      {
+        return 0;
+      }
     }
 
     void Reactor::SetEventCallback(EventCallback callback)
@@ -257,6 +285,10 @@ namespace darwincore
         case Operation::kAdd:
         {
           uint64_t conn_id = DoAddConnection(op.fd, op.peer);
+          if (conn_id == 0)
+          {
+            total_add_failures_.fetch_add(1, std::memory_order_relaxed);
+          }
           if (op.promise)
           {
             op.promise->set_value(conn_id);
@@ -264,11 +296,31 @@ namespace darwincore
           break;
         }
         case Operation::kRemove:
-          DoRemoveConnection(op.connection_id);
+          if (!DoRemoveConnection(op.connection_id))
+          {
+            total_remove_failures_.fetch_add(1, std::memory_order_relaxed);
+          }
           break;
         case Operation::kSend:
-          DoSendData(op.connection_id, op.data);
+          if (!DoSendData(op.connection_id, op.data))
+          {
+            total_send_failures_.fetch_add(1, std::memory_order_relaxed);
+          }
           break;
+        case Operation::kGetSendBufferSize:
+        {
+          uint64_t value = 0;
+          auto it = connections_.find(op.connection_id);
+          if (it != connections_.end())
+          {
+            value = static_cast<uint64_t>(it->second.send_buffer.Size());
+          }
+          if (op.promise)
+          {
+            op.promise->set_value(value);
+          }
+          break;
+        }
         }
       }
 
@@ -486,10 +538,9 @@ namespace darwincore
 
       while (is_running_.load(std::memory_order_acquire))
       {
-        // 1. 处理待执行操作
         ProcessPendingOperations();
 
-        // 2. 定期检查超时（每 5 秒）
+        // 1. 定期检查超时（每 5 秒）
         auto now = std::chrono::steady_clock::now();
         if (now - last_timeout_check >= std::chrono::seconds(5))
         {
@@ -497,9 +548,9 @@ namespace darwincore
           last_timeout_check = now;
         }
 
-        // 3. 等待 I/O 事件
+        // 2. 等待 I/O 事件（通过 EVFILT_USER 可被跨线程即时唤醒）
         struct kevent events[kEventBatchSize];
-        int timeout_ms = 100;
+        int timeout_ms = 5000;
         int count = io_monitor_->WaitEvents(events, kEventBatchSize, &timeout_ms);
 
         if (count < 0)
@@ -513,16 +564,18 @@ namespace darwincore
           break;
         }
 
-        if (count == 0)
-        {
-          continue;
-        }
-
-        // 4. 处理 I/O 事件
+        // 3. 处理 I/O 事件
         for (int i = 0; i < count; ++i)
         {
+          if (events[i].filter == EVFILT_USER && events[i].ident == kWakeupIdent)
+          {
+            continue;
+          }
           ProcessKqueueEvent(events[i]);
         }
+
+        // 4. 处理待执行操作
+        ProcessPendingOperations();
       }
 
       NW_LOG_INFO("[Reactor" << reactor_id_ << "] 事件循环结束");
@@ -737,7 +790,10 @@ namespace darwincore
     {
       if (worker_pool_)
       {
-        worker_pool_->SubmitEvent(event);
+        if (!worker_pool_->SubmitEvent(event))
+        {
+          total_dispatch_failures_.fetch_add(1, std::memory_order_relaxed);
+        }
       }
       else if (event_callback_)
       {
@@ -833,6 +889,14 @@ namespace darwincore
       stats.total_bytes_sent = total_bytes_sent_.load(std::memory_order_relaxed);
       stats.total_bytes_received = total_bytes_received_.load(std::memory_order_relaxed);
       stats.total_ops_processed = total_ops_processed_.load(std::memory_order_relaxed);
+      stats.total_dispatch_failures = total_dispatch_failures_.load(std::memory_order_relaxed);
+      stats.total_add_requests = total_add_requests_.load(std::memory_order_relaxed);
+      stats.total_add_failures = total_add_failures_.load(std::memory_order_relaxed);
+      stats.total_remove_requests = total_remove_requests_.load(std::memory_order_relaxed);
+      stats.total_remove_failures = total_remove_failures_.load(std::memory_order_relaxed);
+      stats.total_send_requests = total_send_requests_.load(std::memory_order_relaxed);
+      stats.total_send_failures = total_send_failures_.load(std::memory_order_relaxed);
+      stats.pending_operation_queue_size = pending_operations_.Size();
       return stats;
     }
 

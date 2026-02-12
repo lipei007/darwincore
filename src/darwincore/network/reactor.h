@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstddef>
 #include <chrono>
 #include <functional>
 #include <future>
@@ -60,6 +61,14 @@ namespace darwincore
         uint64_t total_bytes_sent{0};
         uint64_t total_bytes_received{0};
         uint64_t total_ops_processed{0};
+        uint64_t total_dispatch_failures{0};
+        uint64_t total_add_requests{0};
+        uint64_t total_add_failures{0};
+        uint64_t total_remove_requests{0};
+        uint64_t total_remove_failures{0};
+        uint64_t total_send_requests{0};
+        uint64_t total_send_failures{0};
+        size_t pending_operation_queue_size{0};
       };
 
       Reactor(int id, const std::shared_ptr<WorkerPool> &worker_pool);
@@ -93,7 +102,7 @@ namespace darwincore
        * @param connection_id 连接ID
        * @return 发送缓冲区大小（字节），连接不存在返回0
        */
-      size_t GetSendBufferSize(uint64_t connection_id) const;
+      size_t GetSendBufferSize(uint64_t connection_id);
 
       void SetEventCallback(EventCallback callback);
 
@@ -135,7 +144,8 @@ namespace darwincore
         {
           kAdd,
           kRemove,
-          kSend
+          kSend,
+          kGetSendBufferSize
         };
 
         Type type{kAdd};
@@ -214,6 +224,7 @@ namespace darwincore
       std::unordered_map<int, uint64_t> fd_to_connection_id_;
 
       ConcurrentQueue<Operation> pending_operations_;
+      static constexpr uintptr_t kWakeupIdent = 1;
 
       std::chrono::seconds connection_timeout_;
 
@@ -223,6 +234,13 @@ namespace darwincore
       std::atomic<uint64_t> total_bytes_sent_{0};
       std::atomic<uint64_t> total_bytes_received_{0};
       std::atomic<uint64_t> total_ops_processed_{0};
+      std::atomic<uint64_t> total_dispatch_failures_{0};
+      std::atomic<uint64_t> total_add_requests_{0};
+      std::atomic<uint64_t> total_add_failures_{0};
+      std::atomic<uint64_t> total_remove_requests_{0};
+      std::atomic<uint64_t> total_remove_failures_{0};
+      std::atomic<uint64_t> total_send_requests_{0};
+      std::atomic<uint64_t> total_send_failures_{0};
     };
 
   } // namespace network

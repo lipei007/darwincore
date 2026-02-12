@@ -45,15 +45,32 @@ namespace darwincore
 
     bool WorkerPool::Start()
     {
-      if (is_running_)
+      bool expected = false;
+      if (!is_running_.compare_exchange_strong(expected, true))
       {
         return false;
       }
 
-      is_running_ = true;
-      for (size_t i = 0; i < worker_count_; ++i)
+      try
       {
-        worker_threads_.emplace_back(&WorkerPool::WorkerLoop, this, i);
+        for (size_t i = 0; i < worker_count_; ++i)
+        {
+          worker_threads_.emplace_back(&WorkerPool::WorkerLoop, this, i);
+        }
+      }
+      catch (const std::exception &e)
+      {
+        NW_LOG_ERROR("[WorkerPool] 启动失败: " << e.what());
+        is_running_.store(false, std::memory_order_release);
+        for (auto &worker_thread : worker_threads_)
+        {
+          if (worker_thread.joinable())
+          {
+            worker_thread.join();
+          }
+        }
+        worker_threads_.clear();
+        return false;
       }
 
       NW_LOG_INFO("[WorkerPool] 启动: " << worker_count_ << " 个工作线程");
@@ -62,12 +79,11 @@ namespace darwincore
 
     void WorkerPool::Stop()
     {
-      if (!is_running_)
+      bool expected = true;
+      if (!is_running_.compare_exchange_strong(expected, false))
       {
         return;
       }
-
-      is_running_ = false;
 
       // 通知所有队列停止，唤醒等待中的 Worker 线程
       for (auto &queue : event_queues_)
@@ -88,24 +104,25 @@ namespace darwincore
       NW_LOG_INFO("[WorkerPool] 停止");
     }
 
-    void WorkerPool::SubmitEvent(const NetworkEvent &event)
+    bool WorkerPool::SubmitEvent(const NetworkEvent &event)
     {
-      size_t worker_id = event.connection_id % worker_count_;
-
-      // 阻塞模式：如果队列满，等待直到有空间
-      while (is_running_)
+      if (!is_running_.load(std::memory_order_acquire))
       {
-        if (event_queues_[worker_id]->TryEnqueue(event))
-        {
-          break;
-        }
-        // 队列满，短暂等待后重试
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        submit_failures_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+      }
+
+      size_t worker_id = event.connection_id % worker_count_;
+      if (!event_queues_[worker_id]->Enqueue(event))
+      {
+        submit_failures_.fetch_add(1, std::memory_order_relaxed);
+        return false;
       }
 
       NW_LOG_TRACE("[WorkerPool::SubmitEvent] type="
                    << static_cast<int>(event.type) << ", conn_id="
                    << event.connection_id << ", worker_id=" << worker_id);
+      return true;
     }
 
     bool WorkerPool::TrySubmitEvent(const NetworkEvent &event)
@@ -115,6 +132,7 @@ namespace darwincore
 
       if (!success)
       {
+        submit_failures_.fetch_add(1, std::memory_order_relaxed);
         NW_LOG_WARNING("[WorkerPool::TrySubmitEvent] 队列满: type="
                        << static_cast<int>(event.type) << ", conn_id="
                        << event.connection_id << ", worker_id=" << worker_id);
@@ -144,6 +162,11 @@ namespace darwincore
         total += queue->Size();
       }
       return total;
+    }
+
+    uint64_t WorkerPool::GetSubmitFailures() const
+    {
+      return submit_failures_.load(std::memory_order_relaxed);
     }
 
     void WorkerPool::WorkerLoop(int worker_id)

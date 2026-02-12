@@ -11,6 +11,7 @@ cmake_minimum_required(VERSION 3.20)
 
 # 项目名称: MyLib
 project(MyLib)
+enable_testing()
 
 # 设置 C++ 标准为 C++17
 SET(CMAKE_CXX_STANDARD 17)

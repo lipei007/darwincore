@@ -42,6 +42,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <darwincore/network/event.h>
 
@@ -72,6 +73,43 @@ namespace network {
  */
 class Server {
 public:
+  struct Options {
+    size_t reactor_count{0};     // 0 表示使用 CPU 核数
+    size_t worker_count{4};
+    size_t worker_queue_size{10000}; // 每个 worker 队列容量
+  };
+
+  struct ReactorStatistics {
+    int reactor_id{0};
+    uint64_t total_connections{0};
+    uint64_t active_connections{0};
+    uint64_t total_bytes_sent{0};
+    uint64_t total_bytes_received{0};
+    uint64_t total_ops_processed{0};
+    uint64_t total_dispatch_failures{0};
+    uint64_t total_add_requests{0};
+    uint64_t total_add_failures{0};
+    uint64_t total_remove_requests{0};
+    uint64_t total_remove_failures{0};
+    uint64_t total_send_requests{0};
+    uint64_t total_send_failures{0};
+    size_t pending_operation_queue_size{0};
+  };
+
+  struct Statistics {
+    bool is_running{false};
+    uint64_t total_connections{0};
+    uint64_t active_connections{0};
+    uint64_t total_messages_received{0};
+    uint64_t total_messages_sent{0};
+    uint64_t total_bytes_received{0};
+    uint64_t total_bytes_sent{0};
+    uint64_t total_errors{0};
+    uint64_t worker_submit_failures{0};
+    size_t worker_total_queue_size{0};
+    std::vector<ReactorStatistics> reactors;
+  };
+
   /// 客户端连接回调函数类型
   using OnClientConnectedCallback =
       std::function<void(const ConnectionInformation&)>;
@@ -102,6 +140,7 @@ public:
    * 默认创建 CPU 核数个 Reactor 线程和 4 个 Worker 线程。
    */
   Server();
+  explicit Server(const Options& options);
 
   /**
    * @brief 析构函数
@@ -226,6 +265,13 @@ public:
    * 错误消息仅用于日志记录，业务决策应使用 NetworkError 枚举。
    */
   void SetOnConnectionError(OnConnectionErrorCallback callback);
+
+  /**
+   * @brief 获取运行时统计信息
+   *
+   * 可用于观测负载、吞吐和排队压力。
+   */
+  Statistics GetStatistics() const;
 
 private:
   /// Pimpl 实现（隐藏内部细节）

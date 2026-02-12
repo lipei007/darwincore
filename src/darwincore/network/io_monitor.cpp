@@ -47,7 +47,7 @@ namespace darwincore
 
     void IOMonitor::Close()
     {
-      if (kqueue_fd_ > 0)
+      if (kqueue_fd_ >= 0)
       {
         NW_LOG_DEBUG("[IOMonitor::Close] 关闭 kqueue，fd=" << kqueue_fd_);
         close(kqueue_fd_);
@@ -84,7 +84,7 @@ namespace darwincore
     {
       NW_LOG_DEBUG("[IOMonitor::StopReadMonitor] 停止读监控 fd=" << fd);
 
-      if (kqueue_fd_ <= 0)
+      if (kqueue_fd_ < 0)
       {
         NW_LOG_WARNING("[IOMonitor::StopReadMonitor] kqueue 未初始化");
         return false;
@@ -137,7 +137,7 @@ namespace darwincore
     {
       NW_LOG_DEBUG("[IOMonitor::StopWriteMonitor] 停止写监控 fd=" << fd);
 
-      if (kqueue_fd_ <= 0)
+      if (kqueue_fd_ < 0)
       {
         NW_LOG_WARNING("[IOMonitor::StopWriteMonitor] kqueue 未初始化");
         return false;
@@ -165,7 +165,7 @@ namespace darwincore
     {
       NW_LOG_DEBUG("[IOMonitor::StopMonitor] 停止监控 fd=" << fd);
 
-      if (kqueue_fd_ <= 0)
+      if (kqueue_fd_ < 0)
       {
         NW_LOG_WARNING("[IOMonitor::StopMonitor] kqueue 未初始化");
         return false;
@@ -191,10 +191,50 @@ namespace darwincore
       return true;
     }
 
+    bool IOMonitor::InitializeWakeupEvent(uintptr_t ident)
+    {
+      if (kqueue_fd_ < 0)
+      {
+        NW_LOG_ERROR("[IOMonitor::InitializeWakeupEvent] kqueue 未初始化");
+        return false;
+      }
+
+      struct kevent change;
+      EV_SET(&change, ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+      int ret = kevent(kqueue_fd_, &change, 1, nullptr, 0, nullptr);
+      if (ret < 0)
+      {
+        NW_LOG_ERROR("[IOMonitor::InitializeWakeupEvent] 初始化失败: " << strerror(errno));
+        return false;
+      }
+      return true;
+    }
+
+    bool IOMonitor::TriggerWakeupEvent(uintptr_t ident)
+    {
+      if (kqueue_fd_ < 0)
+      {
+        return false;
+      }
+
+      struct kevent change;
+      EV_SET(&change, ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+      int ret = kevent(kqueue_fd_, &change, 1, nullptr, 0, nullptr);
+      if (ret < 0)
+      {
+        if (errno != EBADF && errno != ENOENT)
+        {
+          NW_LOG_WARNING("[IOMonitor::TriggerWakeupEvent] 触发失败: " << strerror(errno));
+        }
+        return false;
+      }
+      return true;
+    }
+
     int IOMonitor::WaitEvents(struct kevent *events, int max_events,
                               const int *timeout_ms)
     {
-      if (events == nullptr || max_events == 0 || kqueue_fd_ <= 0)
+      if (events == nullptr || max_events == 0 || kqueue_fd_ < 0)
       {
         return 0;
       }

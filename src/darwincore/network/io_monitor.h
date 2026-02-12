@@ -89,6 +89,20 @@ namespace darwincore
       bool StopMonitor(int fd);
 
       /**
+       * @brief 初始化用户态唤醒事件（EVFILT_USER）
+       * @param ident 用户事件标识
+       * @return true 成功, false 失败
+       */
+      bool InitializeWakeupEvent(uintptr_t ident);
+
+      /**
+       * @brief 触发唤醒事件
+       * @param ident 用户事件标识
+       * @return true 成功, false 失败
+       */
+      bool TriggerWakeupEvent(uintptr_t ident);
+
+      /**
        * @brief 等待事件（阻塞）
        * @param events kevent 事件数组
        * @param max_events 事件数组最大容量

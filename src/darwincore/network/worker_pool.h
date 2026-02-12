@@ -18,6 +18,7 @@
 #define DARWINCORE_NETWORK_WORKER_POOL_H
 
 #include <cstdint>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -88,7 +89,7 @@ namespace darwincore
        * 此方法可以从任何线程调用，包括 Reactor 线程。
        * 如果队列满，会阻塞直到有空间可用。
        */
-      void SubmitEvent(const NetworkEvent &event);
+      bool SubmitEvent(const NetworkEvent &event);
 
       /**
        * @brief 尝试提交事件到工作线程池（非阻塞模式）
@@ -115,6 +116,8 @@ namespace darwincore
        */
       size_t GetTotalQueueSize() const;
 
+      uint64_t GetSubmitFailures() const;
+
     private:
       /**
        * @brief Worker 线程的主循环
@@ -137,8 +140,9 @@ namespace darwincore
       std::vector<std::unique_ptr<ConcurrentQueue<NetworkEvent>>> event_queues_; ///< 每个线程的事件队列
       EventCallback event_callback_;                                             ///< 事件回调函数
 
-      std::atomic<size_t> next_worker_index_; ///< 下一个要分配的 Worker 索引（轮询）
-      bool is_running_;                       ///< Worker Pool 运行状态
+      std::atomic<size_t> next_worker_index_{0}; ///< 下一个要分配的 Worker 索引（轮询）
+      std::atomic<bool> is_running_{false};      ///< Worker Pool 运行状态
+      std::atomic<uint64_t> submit_failures_{0}; ///< 提交失败次数（队列满/已停止）
     };
 
   } // namespace network

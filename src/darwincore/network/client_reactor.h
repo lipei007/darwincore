@@ -266,6 +266,7 @@ namespace darwincore
 
       // 发送操作队列
       ConcurrentQueue<SendOperation> send_operations_;
+      static constexpr uintptr_t kWakeupIdent = 2;
 
       // 统计
       std::atomic<uint64_t> total_bytes_sent_{0};

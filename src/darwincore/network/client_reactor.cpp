@@ -52,6 +52,11 @@ namespace darwincore
         NW_LOG_ERROR("[ClientReactor] 初始化 IOMonitor 失败");
         return false;
       }
+      if (!io_monitor_->InitializeWakeupEvent(kWakeupIdent))
+      {
+        NW_LOG_ERROR("[ClientReactor] 初始化唤醒事件失败");
+        return false;
+      }
 
       bool expected = false;
       if (!is_running_.compare_exchange_strong(expected, true))
@@ -86,6 +91,10 @@ namespace darwincore
       NW_LOG_INFO("[ClientReactor] 开始停止");
 
       send_operations_.NotifyStop();
+      if (io_monitor_)
+      {
+        io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      }
 
       // 立即关闭连接
       if (has_connection_.load() && connection_.file_descriptor >= 0)
@@ -200,8 +209,15 @@ namespace darwincore
       SendOperation op;
       op.type = SendOperation::kAsync;
       op.data.assign(data, data + size);
-
-      return send_operations_.Enqueue(op);
+      if (!send_operations_.Enqueue(op))
+      {
+        return false;
+      }
+      if (io_monitor_)
+      {
+        io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      }
+      return true;
     }
 
     bool ClientReactor::SendSync(const uint8_t *data, size_t size, int timeout_ms)
@@ -227,6 +243,10 @@ namespace darwincore
       if (!send_operations_.Enqueue(op))
       {
         return false;
+      }
+      if (io_monitor_)
+      {
+        io_monitor_->TriggerWakeupEvent(kWakeupIdent);
       }
 
       // 等待发送完成
@@ -272,8 +292,15 @@ namespace darwincore
       op.type = SendOperation::kAsyncCallback;
       op.data.assign(data, data + size);
       op.callback = std::move(callback);
-
-      return send_operations_.Enqueue(op);
+      if (!send_operations_.Enqueue(op))
+      {
+        return false;
+      }
+      if (io_monitor_)
+      {
+        io_monitor_->TriggerWakeupEvent(kWakeupIdent);
+      }
+      return true;
     }
 
     // ============ 状态查询实现 ============
@@ -323,7 +350,7 @@ namespace darwincore
 
         // 2. 等待 I/O 事件
         struct kevent events[kEventBatchSize];
-        int timeout_ms = 100;
+        int timeout_ms = 5000;
         int count = io_monitor_->WaitEvents(events, kEventBatchSize, &timeout_ms);
 
         if (count < 0)
@@ -336,14 +363,13 @@ namespace darwincore
           break;
         }
 
-        if (count == 0)
-        {
-          continue;
-        }
-
         // 3. 处理 I/O 事件
         for (int i = 0; i < count; ++i)
         {
+          if (events[i].filter == EVFILT_USER && events[i].ident == kWakeupIdent)
+          {
+            continue;
+          }
           ProcessKqueueEvent(events[i]);
         }
       }

@@ -38,7 +38,7 @@ namespace darwincore
     class Server::Impl
     {
     public:
-      Impl();
+      explicit Impl(const Server::Options &options);
       ~Impl();
 
       // 启动接口
@@ -53,6 +53,7 @@ namespace darwincore
 
       // 数据发送
       bool SendData(uint64_t connection_id, const uint8_t *data, size_t size);
+      Server::Statistics GetStatistics() const;
 
       // 回调设置
       void SetOnClientConnected(Server::OnClientConnectedCallback callback);
@@ -103,14 +104,21 @@ namespace darwincore
       // ============ 统计信息 ============
       std::atomic<uint64_t> total_connections_{0};
       std::atomic<uint64_t> active_connections_{0};
+      std::atomic<uint64_t> total_messages_received_{0};
+      std::atomic<uint64_t> total_messages_sent_{0};
+      std::atomic<uint64_t> total_bytes_received_{0};
+      std::atomic<uint64_t> total_bytes_sent_{0};
+      std::atomic<uint64_t> total_errors_{0};
 
       // ============ 配置 ============
       size_t reactor_count_{0};
+      Server::Options options_;
     };
 
     // ============ 构造/析构 ============
 
-    Server::Impl::Impl()
+    Server::Impl::Impl(const Server::Options &options)
+        : options_(options)
     {
       // 全局忽略 SIGPIPE（只需设置一次）
       static std::once_flag sigpipe_flag;
@@ -179,9 +187,11 @@ namespace darwincore
         return true; // 已初始化
       }
 
-      size_t worker_count = SocketConfiguration::kDefaultWorkerCount;
-
-      worker_pool_ = std::make_shared<WorkerPool>(worker_count);
+      size_t worker_count = options_.worker_count == 0
+                                ? SocketConfiguration::kDefaultWorkerCount
+                                : options_.worker_count;
+      size_t worker_queue_size = options_.worker_queue_size;
+      worker_pool_ = std::make_shared<WorkerPool>(worker_count, worker_queue_size);
 
       if (!worker_pool_->Start())
       {
@@ -201,8 +211,15 @@ namespace darwincore
         return true; // 已初始化
       }
 
-      // Reactor 数量 = CPU 核数（至少 1 个）
-      reactor_count_ = std::max(1u, std::thread::hardware_concurrency());
+      if (options_.reactor_count == 0)
+      {
+        // Reactor 数量 = CPU 核数（至少 1 个）
+        reactor_count_ = std::max(1u, std::thread::hardware_concurrency());
+      }
+      else
+      {
+        reactor_count_ = options_.reactor_count;
+      }
 
       NW_LOG_INFO("[Server] 准备创建 " << reactor_count_ << " 个 Reactor");
 
@@ -449,7 +466,65 @@ namespace darwincore
         return false;
       }
 
-      return reactors_[reactor_id]->SendData(connection_id, data, size);
+      bool success = reactors_[reactor_id]->SendData(connection_id, data, size);
+      if (success)
+      {
+        total_messages_sent_.fetch_add(1, std::memory_order_relaxed);
+        total_bytes_sent_.fetch_add(size, std::memory_order_relaxed);
+      }
+      return success;
+    }
+
+    Server::Statistics Server::Impl::GetStatistics() const
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+
+      Server::Statistics stats;
+      stats.is_running = (GetState() == ServerState::kRunning);
+      stats.total_connections = total_connections_.load(std::memory_order_relaxed);
+      stats.active_connections = active_connections_.load(std::memory_order_relaxed);
+      stats.total_messages_received = total_messages_received_.load(std::memory_order_relaxed);
+      stats.total_messages_sent = total_messages_sent_.load(std::memory_order_relaxed);
+      stats.total_bytes_received = total_bytes_received_.load(std::memory_order_relaxed);
+      stats.total_bytes_sent = total_bytes_sent_.load(std::memory_order_relaxed);
+      stats.total_errors = total_errors_.load(std::memory_order_relaxed);
+      if (worker_pool_)
+      {
+        stats.worker_submit_failures = worker_pool_->GetSubmitFailures();
+      }
+
+      if (worker_pool_)
+      {
+        stats.worker_total_queue_size = worker_pool_->GetTotalQueueSize();
+      }
+
+      stats.reactors.reserve(reactors_.size());
+      for (const auto &reactor : reactors_)
+      {
+        if (!reactor)
+        {
+          continue;
+        }
+        auto r = reactor->GetStatistics();
+        Server::ReactorStatistics item;
+        item.reactor_id = r.reactor_id;
+        item.total_connections = r.total_connections;
+        item.active_connections = r.active_connections;
+        item.total_bytes_sent = r.total_bytes_sent;
+        item.total_bytes_received = r.total_bytes_received;
+        item.total_ops_processed = r.total_ops_processed;
+        item.total_dispatch_failures = r.total_dispatch_failures;
+        item.total_add_requests = r.total_add_requests;
+        item.total_add_failures = r.total_add_failures;
+        item.total_remove_requests = r.total_remove_requests;
+        item.total_remove_failures = r.total_remove_failures;
+        item.total_send_requests = r.total_send_requests;
+        item.total_send_failures = r.total_send_failures;
+        item.pending_operation_queue_size = r.pending_operation_queue_size;
+        stats.reactors.push_back(item);
+      }
+
+      return stats;
     }
 
     // ============ 回调设置 ============
@@ -510,6 +585,8 @@ namespace darwincore
       case NetworkEventType::kData:
         NW_LOG_TRACE("[Server] 收到数据: conn_id=" << event.connection_id
                                                    << ", size=" << event.payload.size());
+        total_messages_received_.fetch_add(1, std::memory_order_relaxed);
+        total_bytes_received_.fetch_add(event.payload.size(), std::memory_order_relaxed);
 
         if (on_message_)
         {
@@ -546,6 +623,7 @@ namespace darwincore
       case NetworkEventType::kError:
         NW_LOG_WARNING("[Server] 连接错误: conn_id=" << event.connection_id
                                                      << ", error=" << event.error_message);
+        total_errors_.fetch_add(1, std::memory_order_relaxed);
 
         if (on_connection_error_ && event.error)
         {
@@ -569,7 +647,9 @@ namespace darwincore
 
     // ============ Server 公共接口 ============
 
-    Server::Server() : impl_(std::make_unique<Impl>()) {}
+    Server::Server() : impl_(std::make_unique<Impl>(Options{})) {}
+
+    Server::Server(const Options &options) : impl_(std::make_unique<Impl>(options)) {}
 
     Server::~Server() = default;
 
@@ -621,6 +701,11 @@ namespace darwincore
     void Server::SetOnConnectionError(OnConnectionErrorCallback callback)
     {
       impl_->SetOnConnectionError(std::move(callback));
+    }
+
+    Server::Statistics Server::GetStatistics() const
+    {
+      return impl_->GetStatistics();
     }
 
   } // namespace network
